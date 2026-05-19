@@ -64,8 +64,8 @@ async function start() {
     await sequelize.authenticate();
     logger.info("✅ Base de datos conectada.");
 
-    // Sync: crea la tabla `facturas` si no existe (safe alter)
-    await sequelize.sync({ alter: true });
+    // Sync: crea la tabla facturas si no existe
+    await sequelize.sync();
 
     app.listen(PORT, () => {
       logger.info(`🚀 ContableIA API corriendo en http://localhost:${PORT}`);

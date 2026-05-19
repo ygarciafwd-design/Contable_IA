@@ -14,10 +14,10 @@ const Factura = sequelize.define('Factura', {
 
   // ── Identificación ──────────────────────────────────────────────────────────
   id: {
-    type:         DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey:   true,
-    comment:      'PK único universal',
+    type:          DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey:    true,
+    comment:       'PK auto-incremental',
   },
 
   // ── Trazabilidad de origen ──────────────────────────────────────────────────

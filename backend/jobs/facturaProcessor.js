@@ -43,8 +43,11 @@ function md5(buffer) {
  * @returns {Promise<boolean>}
  */
 async function isDuplicate(hash) {
-  const count = await Factura.count({ where: { hashMd5: hash } });
-  return count > 0;
+  const existing = await Factura.findOne({ where: { hashMd5: hash } });
+  if (existing && existing.estado === 'PROCESSED') {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -87,24 +90,32 @@ function parseDecimal(val) {
 async function processDocument({ buffer, name, mimeType, canal, origenId }) {
   const hash = md5(buffer);
 
-  // ── Filtro anti-duplicado ──────────────────────────────────────────────────
-  if (await isDuplicate(hash)) {
+  // Buscar si ya existe el registro con ese hash (para re-intentar en caso de ERROR)
+  const existing = await Factura.findOne({ where: { hashMd5: hash } });
+  if (existing && existing.estado === 'PROCESSED') {
     logger.info(`[FacturaProcessor] Duplicado omitido: '${name}' (${hash})`);
     return;
   }
 
-  let factura;
+  let factura = existing;
   try {
     // ── OCR estructurado ───────────────────────────────────────────────────────
     const ocr = await extractInvoiceData(buffer, mimeType, name);
 
     if (ocr?.error === 'no_es_factura') {
       logger.warn(`[FacturaProcessor] '${name}' no es una factura, omitido.`);
+      if (factura) {
+        await factura.destroy();
+      }
       return;
     }
 
     const data = mapOcrToFactura(ocr, canal, origenId, name, mimeType, hash);
-    factura = await Factura.create(data);
+    if (factura) {
+      await factura.update(data);
+    } else {
+      factura = await Factura.create(data);
+    }
 
     logger.info(
       `[FacturaProcessor] ✅ GUARDADO — ID: ${factura.id} | ` +
@@ -116,16 +127,24 @@ async function processDocument({ buffer, name, mimeType, canal, origenId }) {
 
     // Guardar registro de error para auditoría
     try {
-      await Factura.create({
-        canal,
-        origenId,
-        filename:    name,
-        mimeType,
-        hashMd5:     hash,
-        estado:      'ERROR',
-        errorDetalle: err.message,
-        rawOcr:      null,
-      });
+      if (factura) {
+        await factura.update({
+          estado: 'ERROR',
+          errorDetalle: err.message,
+          rawOcr: null,
+        });
+      } else {
+        await Factura.create({
+          canal,
+          origenId,
+          filename:    name,
+          mimeType,
+          hashMd5:     hash,
+          estado:      'ERROR',
+          errorDetalle: err.message,
+          rawOcr:      null,
+        });
+      }
     } catch (dbErr) {
       logger.error(`[FacturaProcessor] ❌ No se pudo persistir el ERROR: ${dbErr.message}`);
     }

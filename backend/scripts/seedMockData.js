@@ -121,6 +121,8 @@ async function seed() {
   try {
     await sequelize.authenticate();
     console.log('✅ Conexión establecida con MySQL.');
+    await sequelize.sync();
+    console.log('✅ Tablas sincronizadas.');
 
     // 1. Insertar usuarios
     for (const u of mockUsers) {

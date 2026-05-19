@@ -40,9 +40,10 @@ function toEpochSec(date) {
  * @returns {Promise<Array<{messageId, subject, from, name, mimeType, buffer}>>}
  */
 async function fetchNewAttachments(bootTime) {
-  const after = toEpochSec(bootTime);
+  const scanStart = new Date(bootTime.getTime() - 2 * 60 * 60 * 1000); // Buscar últimas 2 horas
+  const after = toEpochSec(scanStart);
 
-  logger.info(`[GmailServer] Buscando correos con adjuntos desde epoch ${after}`);
+  logger.info(`[GmailServer] Buscando correos con adjuntos desde epoch ${after} (últimas 2 horas)`);
 
   // Buscar IDs de mensajes
   let messageIds = [];

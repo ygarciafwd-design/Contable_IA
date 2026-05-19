@@ -40,9 +40,10 @@ const ACCEPTED_MIME = [
  * @returns {Promise<Array<{id, name, mimeType, buffer}>>}
  */
 async function fetchNewFiles(bootTime) {
-  const since = bootTime.toISOString();
+  const scanStart = new Date(bootTime.getTime() - 2 * 60 * 60 * 1000); // Buscar últimas 2 horas
+  const since = scanStart.toISOString();
 
-  logger.info(`[DriveServer] Buscando archivos nuevos desde ${since}`);
+  logger.info(`[DriveServer] Buscando archivos nuevos desde ${since} (últimas 2 horas)`);
 
   let files = [];
   try {
