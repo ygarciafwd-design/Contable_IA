@@ -17,6 +17,7 @@ const Dashboard = () => {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [facturas, setFacturas] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   // Admin View States
@@ -30,14 +31,16 @@ const Dashboard = () => {
   useEffect(() => {
     loadConversations();
     loadDocuments();
+    loadFacturas();
   }, []);
 
   // Poll processed docs and conversations list
   useEffect(() => {
     const timer = setInterval(() => {
-      // Reload documents to check processed status
+      // Reload documents and facturas to check processed status
       if (location.pathname === '/dashboard/docs') {
         loadDocuments();
+        loadFacturas();
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -66,6 +69,15 @@ const Dashboard = () => {
       setDocuments(data.documents || []);
     } catch (err) {
       console.error('Error loading documents:', err);
+    }
+  };
+
+  const loadFacturas = async () => {
+    try {
+      const data = await apiFetch('/facturas');
+      setFacturas(data.data || []);
+    } catch (err) {
+      console.error('Error loading facturas:', err);
     }
   };
 
@@ -312,6 +324,7 @@ const Dashboard = () => {
             element={
               <DocsView 
                 documents={documents}
+                facturas={facturas}
                 onUploadDoc={handleUploadDoc}
                 onDeleteDoc={handleDeleteDoc}
               />

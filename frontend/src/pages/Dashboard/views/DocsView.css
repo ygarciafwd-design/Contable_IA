@@ -18,7 +18,7 @@
 .doc-card:hover { border-color: var(--border2); }
 .doc-icon { font-size: 28px; flex-shrink: 0; }
 .doc-info { flex: 1; }
-.doc-name { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+.doc-name { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .doc-meta { font-size: 11px; color: var(--text3); }
 .doc-status { font-size: 11px; }
 .doc-status.processing { color: var(--orange); }
@@ -36,4 +36,67 @@
   border-color: var(--red);
   color: var(--red);
   background: rgba(239, 68, 68, 0.05);
+}
+
+/* ── Factura card enhancements ──────────────────────────────── */
+.factura-card {
+  border-left: 3px solid var(--accent, #00d4ff);
+}
+.factura-card:hover {
+  border-color: var(--accent, #00d4ff);
+  background: rgba(0, 212, 255, 0.03);
+}
+.factura-card.factura-error {
+  border-left-color: var(--orange, #f59e0b);
+}
+
+/* Canal badges */
+.canal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.canal-gmail {
+  background: rgba(234, 67, 53, 0.12);
+  color: #ea4335;
+}
+.canal-drive {
+  background: rgba(52, 168, 83, 0.12);
+  color: #34a853;
+}
+.canal-upload_manual {
+  background: rgba(66, 133, 244, 0.12);
+  color: #4285f4;
+}
+
+/* Factura meta row */
+.factura-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+  margin-bottom: 2px;
+}
+.factura-proveedor {
+  font-weight: 600;
+  color: var(--text2, #c0c6d0);
+  font-size: 12px;
+}
+.factura-total {
+  font-weight: 700;
+  color: var(--green, #10b981);
+  font-size: 12px;
+}
+.factura-numero {
+  font-size: 11px;
+  color: var(--text3);
+  opacity: 0.8;
 }
