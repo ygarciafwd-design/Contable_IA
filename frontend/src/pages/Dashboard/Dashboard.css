@@ -1,0 +1,27 @@
+#app { display: flex; height: 100vh; width: 100vw; background: var(--bg); overflow: hidden; }
+
+/* ── MAIN AREA ─────────────────────────────────────────── */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; height: 100vh; }
+.topbar {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.topbar-title { font-family: var(--font-serif); font-size: 16px; color: var(--text); flex: 1; }
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+.btn-icon {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; cursor: pointer;
+  color: var(--text2); font-size: 13px;
+  transition: all 0.15s; display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-sans);
+}
+.btn-icon:hover { border-color: var(--accent); color: var(--accent); }
+.btn-icon:disabled { opacity: 0.5; cursor: not-allowed; border-color: var(--border); color: var(--text3); }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{ opacity: 1; } 50%{ opacity: 0.5; } }
+
+/* ── UTILS ─────────────────────────────────────────── */
+.hidden { display: none !important; }
