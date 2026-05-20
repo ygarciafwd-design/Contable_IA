@@ -1,22 +1,29 @@
 /**
  * services/ocrService.js
- * Extracción estructurada de facturas con IA (Claude claude-sonnet-4-20250514).
- * Soporta PDF (via pdf-parse) e imágenes (base64 vision).
+ * Extracción estructurada de facturas con IA (Groq - LLaMA 3.3).
+ * Soporta PDF digitales (vía pdf-parse). Las imágenes y PDFs escaneados
+ * se manejan con fallback informativo debido a que Groq no tiene
+ * modelos de visión activos en su API gratuita.
+ * 
  * Retorna un objeto con los campos estándar de factura.
  */
 
 'use strict';
 
-const Anthropic  = require('@anthropic-ai/sdk');
+const { OpenAI } = require('openai');
 const pdfParse   = require('pdf-parse');
 const logger     = require('./loggerService');
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Inicialización de Groq usando el SDK de OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY || '',
+  baseURL: 'https://api.groq.com/openai/v1'
+});
 
 // ── Prompt de extracción ──────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Eres un sistema OCR especializado en facturas comerciales y fiscales.
 Tu única tarea es extraer campos de una factura y responder ÚNICAMENTE con un objeto JSON válido.
-No escribas ningún texto fuera del JSON.
+No escribas ningún texto fuera del JSON, ni siquiera markdown como \`\`\`json. Responde directamente con las llaves {}.
 
 Campos a extraer (usa null si no se encuentra el dato):
 {
@@ -27,7 +34,7 @@ Campos a extraer (usa null si no se encuentra el dato):
   "numero_factura":   "Número o folio de la factura",
   "fecha_emision":    "Fecha de emisión en formato YYYY-MM-DD",
   "fecha_vencimiento":"Fecha de vencimiento en formato YYYY-MM-DD",
-  "moneda":           "Código de moneda (CRC, USD, EUR, etc.)",
+  "moneda":           "Código de moneda (CRC, USD, EUR, ARS, etc.)",
   "subtotal":         número sin símbolo de moneda,
   "impuestos":        número sin símbolo de moneda,
   "descuentos":       número sin símbolo de moneda,
@@ -50,64 +57,57 @@ async function extractInvoiceData(buffer, mimeType, filename = 'documento') {
   logger.info(`[OCR] Procesando: '${filename}' (${mimeType})`);
 
   try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('tu_api_key')) {
+    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.startsWith('tu_api_key')) {
+      logger.warn('[OCR] GROQ_API_KEY no configurada, usando fallback simulado.');
       return fallbackExtractInvoiceData(filename);
     }
 
-    let content;
-    if (mimeType === 'application/pdf') {
-      // PDF → texto plano → enviar como texto al LLM
-      const parsed = await pdfParse(buffer);
-      const text   = parsed.text?.trim() || '';
+    let extractedText = '';
 
-      if (!text) {
-        logger.warn(`[OCR] PDF sin texto extraíble en '${filename}', intentando como imagen...`);
-        // Si el PDF es escaneado (imagen), Claude no puede procesar el PDF como visión directo;
-        // fallback: informar al modelo con el contenido binario base64 como documento
-        content = buildPdfDocumentContent(buffer);
-      } else {
-        content = [{ type: 'text', text: `CONTENIDO DEL DOCUMENTO:\n\n${text}` }];
-      }
-    } else {
-      // Imagen → base64 vision
-      content = [
-        {
-          type:   'image',
-          source: {
-            type:       'base64',
-            media_type: mimeType,
-            data:       buffer.toString('base64'),
-          },
-        },
-        { type: 'text', text: 'Extrae los campos de esta factura.' },
-      ];
+    if (mimeType === 'application/pdf') {
+      // Intentar extraer texto del PDF digital
+      const parsed = await pdfParse(buffer);
+      extractedText = parsed.text?.trim() || '';
     }
 
-    const response = await client.messages.create({
-      model:      'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system:     SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content }],
+    // Si es imagen o un PDF escaneado (sin texto extraído)
+    if (!extractedText) {
+      logger.warn(
+        `[OCR] '${filename}' es una imagen o PDF escaneado. ` +
+        `Dado que la capa gratuita de Groq no incluye modelos de visión, se usará el procesamiento simulado.`
+      );
+      return fallbackExtractInvoiceData(filename, 'Procesamiento simulado (las imágenes requieren modelos de visión no disponibles en la capa gratuita de Groq).');
+    }
+
+    // Si logramos extraer texto del PDF digital, lo procesamos con LLaMA 3.3
+    const completion = await openai.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `CONTENIDO DEL DOCUMENTO:\n\n${extractedText}\n\nExtrae los campos de esta factura.` }
+      ],
+      temperature: 0.1,
+      max_tokens: 1024
     });
 
-    const raw = response.content?.[0]?.text?.trim() || '{}';
+    const raw = completion.choices[0].message.content.trim();
     const data = safeParseJSON(raw, filename);
 
     if (data?.error) {
       logger.warn(`[OCR] '${filename}' no identificado como factura: ${data.error}`);
     } else {
-      logger.info(`[OCR] ✅ Factura extraída: nº ${data.numero_factura} | Total ${data.total}`);
+      logger.info(`[OCR] ✅ Factura extraída exitosamente con Groq: nº ${data.numero_factura} | Total ${data.total}`);
     }
 
     return data;
 
   } catch (err) {
-    console.warn('⚠️ Error en Claude OCR, usando fallback local:', err.message);
+    console.warn('⚠️ Error en Groq OCR, usando fallback local:', err.message);
     return fallbackExtractInvoiceData(filename);
   }
 }
 
-function fallbackExtractInvoiceData(filename) {
+function fallbackExtractInvoiceData(filename, detalleCustom = null) {
   const cleanName = filename.replace(/\.[^/.]+$/, "");
   const numFactura = 'F-2026-' + Math.floor(1000 + Math.random() * 9000);
   const total = Math.floor(15000 + Math.random() * 85000);
@@ -128,23 +128,8 @@ function fallbackExtractInvoiceData(filename) {
     descuentos: 0,
     total: total,
     tipo_documento: 'factura',
-    descripcion: `Factura extraída de '${cleanName}'. Procesamiento simulado por falta de API Key externa.`,
+    descripcion: detalleCustom || `Factura extraída de '${cleanName}'. Procesamiento simulado por falta de API Key o compatibilidad en Groq.`,
   };
-}
-
-/** Construye content block para PDF binario (cuando pdfParse no extrae texto). */
-function buildPdfDocumentContent(buffer) {
-  return [
-    {
-      type:   'document',
-      source: {
-        type:       'base64',
-        media_type: 'application/pdf',
-        data:       buffer.toString('base64'),
-      },
-    },
-    { type: 'text', text: 'Extrae los campos de esta factura.' },
-  ];
 }
 
 /** Parsea JSON con limpieza de posibles markdown fences. */

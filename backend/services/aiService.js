@@ -1,7 +1,20 @@
-const Anthropic = require('@anthropic-ai/sdk');
+/**
+ * services/aiService.js
+ * Servicio de IA para chat, generación SQL, reportes y resumen de documentos.
+ * Proveedor: Groq (llama-3.3-70b-versatile).
+ */
+
+'use strict';
+
+const { OpenAI } = require('openai');
 const sequelize = require('../config/database');
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY || '',
+  baseURL: 'https://api.groq.com/openai/v1'
+});
+
+// ── Helpers existentes (sin cambios) ──────────────────────────────────────────
 
 // Esquema de BD para contexto de la IA
 async function getDatabaseSchema() {
@@ -52,36 +65,7 @@ async function executeSafeSQL(sql) {
   return { results, rowCount: results.length };
 }
 
-// Generar SQL desde lenguaje natural
-// Generar SQL desde lenguaje natural
-async function generateSQL(userQuestion, schema) {
-  try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('tu_api_key')) {
-      return fallbackGenerateSQL(userQuestion);
-    }
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: `Eres un experto en SQL MySQL. Convierte preguntas en lenguaje natural a consultas SQL SELECT válidas.
-      
-Esquema de la base de datos:
-${schema}
-
-REGLAS:
-- Solo genera consultas SELECT (nunca INSERT, UPDATE, DELETE, DROP)
-- Usa alias descriptivos en español
-- Limita resultados con LIMIT cuando sea apropiado
-- Responde SOLO con el SQL, sin explicaciones ni markdown
-- Si no puedes generar un SQL válido, responde: CANNOT_GENERATE`,
-      messages: [{ role: 'user', content: userQuestion }],
-    });
-
-    return response.content[0].text.trim();
-  } catch (error) {
-    console.warn('⚠️ Error al generar SQL con Claude, usando fallback local:', error.message);
-    return fallbackGenerateSQL(userQuestion);
-  }
-}
+// ── Fallbacks locales (sin cambios) ───────────────────────────────────────────
 
 function fallbackGenerateSQL(userQuestion) {
   const q = userQuestion.toLowerCase();
@@ -172,7 +156,49 @@ function fallbackSummarizeDocument(text, filename) {
 - Estado: Procesado correctamente y disponible para el análisis del asistente.`;
 }
 
-// Servicio principal del chat
+// ── Funciones principales con Groq ──────────────────────────────────────────
+
+// Verificar si la API key está configurada
+function isGroqConfigured() {
+  return process.env.GROQ_API_KEY && !process.env.GROQ_API_KEY.startsWith('tu_api_key');
+}
+
+// Generar SQL desde lenguaje natural
+async function generateSQL(userQuestion, schema) {
+  try {
+    if (!isGroqConfigured()) {
+      return fallbackGenerateSQL(userQuestion);
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: `Eres un experto en SQL MySQL. Convierte preguntas en lenguaje natural a consultas SQL SELECT válidas.
+      
+Esquema de la base de datos:
+${schema}
+
+REGLAS:
+- Solo genera consultas SELECT (nunca INSERT, UPDATE, DELETE, DROP)
+- Usa alias descriptivos en español
+- Limita resultados con LIMIT cuando sea apropiado
+- Responde SOLO con el SQL, sin explicaciones ni markdown
+- Si no puedes generar un SQL válido, responde: CANNOT_GENERATE`
+        },
+        { role: "user", content: userQuestion }
+      ]
+    });
+
+    return completion.choices[0].message.content.trim();
+  } catch (error) {
+    console.warn('⚠️ Error al generar SQL con Groq, usando fallback local:', error.message);
+    return fallbackGenerateSQL(userQuestion);
+  }
+}
+
+// Asistente de chat principal
 exports.processMessage = async ({ userMessage, conversationHistory, documentContext, user }) => {
   const startTime = Date.now();
 
@@ -223,39 +249,39 @@ Por favor, analiza estos datos y responde la pregunta original de forma clara.`;
     }
   }
 
-  // Preparar historial para la IA
-  const messages = [
-    ...conversationHistory.map(msg => ({
-      role: msg.role === 'assistant' ? 'assistant' : 'user',
-      content: msg.content,
-    })),
-    { role: 'user', content: finalMessage },
-  ];
-
   try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('tu_api_key')) {
+    if (!isGroqConfigured()) {
       return fallbackProcessMessage(userMessage, sqlExecuted, sqlResults);
     }
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      system: systemPrompt,
-      messages,
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...conversationHistory.map(msg => ({
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
+        content: msg.content
+      })),
+      { role: "user", content: finalMessage }
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: messages
     });
 
-    const assistantMessage = response.content[0].text;
+    const assistantMessage = completion.choices[0].message.content;
     const processingTime = Date.now() - startTime;
+    const usage = completion.usage || {};
 
     return {
       message: assistantMessage,
       sqlExecuted,
       sqlResults,
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+      tokensUsed: usage.total_tokens || 0,
       processingTime,
       type: sqlExecuted ? 'sql_result' : 'text',
     };
   } catch (error) {
-    console.warn('⚠️ Error al conectar con Claude API, usando fallback local:', error.message);
+    console.warn('⚠️ Error al conectar con Groq API, usando fallback local:', error.message);
     return fallbackProcessMessage(userMessage, sqlExecuted, sqlResults);
   }
 };
@@ -263,27 +289,23 @@ Por favor, analiza estos datos y responde la pregunta original de forma clara.`;
 // Generar reporte desde conversación
 exports.generateReport = async (conversationMessages, reportType) => {
   try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('tu_api_key')) {
+    if (!isGroqConfigured()) {
       return fallbackGenerateReport(conversationMessages, reportType);
     }
+
     const history = conversationMessages.map(m => `${m.role}: ${m.content}`).join('\n');
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      system: `Eres un experto contable. Genera reportes financieros profesionales en formato markdown.`,
-      messages: [{
-        role: 'user',
-        content: `Basándote en esta conversación, genera un reporte de tipo "${reportType}":
-
-${history}
-
-Genera un reporte profesional con: resumen ejecutivo, datos clave, análisis, recomendaciones y conclusiones.`,
-      }],
+    
+    const completion = await openai.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: "Eres un experto contable. Genera reportes financieros profesionales en formato markdown." },
+        { role: "user", content: `Basándote en esta conversación, genera un reporte de tipo "${reportType}":\n\n${history}\n\nGenera un reporte profesional con: resumen ejecutivo, datos clave, análisis, recomendaciones y conclusiones.` }
+      ]
     });
 
-    return response.content[0].text;
+    return completion.choices[0].message.content;
   } catch (error) {
-    console.warn('⚠️ Error al generar reporte con Claude, usando fallback local:', error.message);
+    console.warn('⚠️ Error al generar reporte con Groq, usando fallback local:', error.message);
     return fallbackGenerateReport(conversationMessages, reportType);
   }
 };
@@ -291,21 +313,21 @@ Genera un reporte profesional con: resumen ejecutivo, datos clave, análisis, re
 // Resumir PDF para RAG
 exports.summarizeDocument = async (text, filename) => {
   try {
-    if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.startsWith('tu_api_key')) {
+    if (!isGroqConfigured()) {
       return fallbackSummarizeDocument(text, filename);
     }
+
     const truncated = text.substring(0, 8000);
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      messages: [{
-        role: 'user',
-        content: `Resume este documento financiero/contable "${filename}" extrayendo: tipo de documento, fechas, montos clave, partes involucradas, conceptos contables relevantes:\n\n${truncated}`,
-      }],
+    const completion = await openai.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "user", content: `Resume este documento financiero/contable "${filename}" extrayendo: tipo de documento, fechas, montos clave, partes involucradas, conceptos contables relevantes:\n\n${truncated}` }
+      ]
     });
-    return response.content[0].text;
+
+    return completion.choices[0].message.content;
   } catch (error) {
-    console.warn('⚠️ Error al resumir documento con Claude, usando fallback local:', error.message);
+    console.warn('⚠️ Error al resumir documento con Grok, usando fallback local:', error.message);
     return fallbackSummarizeDocument(text, filename);
   }
 };

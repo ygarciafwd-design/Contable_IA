@@ -50,7 +50,7 @@ async function fetchNewAttachments(bootTime) {
   try {
     const res = await gmail.users.messages.list({
       userId: 'me',
-      q: `has:attachment after:${after}`,
+      q: `is:unread has:attachment after:${after}`,
       maxResults: 50,
     });
     messageIds = (res.data.messages || []).map(m => m.id);
